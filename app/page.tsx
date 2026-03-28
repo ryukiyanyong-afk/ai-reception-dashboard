@@ -1,8 +1,11 @@
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase-server";
 import StatusButton from "./components/StatusButton";
 import AddCallForm from "./components/AddCallForm";
 import MemoEditor from "./components/MemoEditor";
+import InviteMemberForm from "./components/InviteMemberForm";
+import DeleteCallButton from "./components/DeleteCallButton";
 
 type CallRow = {
   id: string;
@@ -14,12 +17,9 @@ type CallRow = {
   summary: string | null;
   memo: string | null;
   status: string | null;
+  company_id: string | null;
+  deleted_at: string | null;
 };
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 function formatDate(dateString: string | null) {
   if (!dateString) return "-";
@@ -78,16 +78,62 @@ export default async function Home({
 }: {
   searchParams?: Promise<{ filter?: string; q?: string }>;
 }) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profileData, error: profileError } = await supabase
+    .from("profiles")
+    .select("company_id")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError || !profileData?.company_id) {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          background: "#f7f7f8",
+          padding: 24,
+          fontFamily: "sans-serif",
+        }}
+      >
+        <div style={{ maxWidth: 960, margin: "0 auto" }}>
+          <h1 style={{ fontSize: 32, fontWeight: 700, margin: 0 }}>
+            AI受付ダッシュボード
+          </h1>
+          <p style={{ color: "#666", marginTop: 8 }}>
+            会社情報の設定がまだ完了していません
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  const { data: companyData } = await supabase
+    .from("companies")
+    .select("name, invite_code")
+    .eq("id", profileData.company_id)
+    .single();
+
   const params = searchParams ? await searchParams : {};
   const filter = params?.filter || "all";
   const q = params?.q?.trim() || "";
 
-  const { data, error } = await supabase
-    .from("calls")
-    .select(
-      "id, created_at, caller_phone, calls_name, purpose, urgency, summary, memo, status"
-    )
-    .order("created_at", { ascending: false });
+ const { data, error } = await supabase
+  .from("calls")
+  .select(
+    "id, created_at, caller_phone, calls_name, purpose, urgency, summary, memo, status, company_id, deleted_at"
+  )
+  .eq("company_id", profileData.company_id)
+  .is("deleted_at", null)
+  .order("created_at", { ascending: false });
 
   const calls: CallRow[] = data ?? [];
 
@@ -168,6 +214,41 @@ export default async function Home({
           </p>
         </div>
 
+        <div
+          style={{
+            background: "#fff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            padding: 16,
+            marginBottom: 16,
+          }}
+        >
+          <div style={{ fontSize: 14, color: "#666" }}>会社名</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>
+            {companyData?.name || "-"}
+          </div>
+
+          <div style={{ fontSize: 14, color: "#666", marginTop: 12 }}>
+            招待コード
+          </div>
+          <div
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              letterSpacing: 2,
+              marginTop: 6,
+              color: "#111827",
+            }}
+          >
+            {companyData?.invite_code || "-"}
+          </div>
+
+          <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
+            社員を追加するときは、この招待コードを共有してください
+          </div>
+        </div>
+
+        <InviteMemberForm />
         <AddCallForm />
 
         <div
@@ -178,24 +259,60 @@ export default async function Home({
             marginBottom: 24,
           }}
         >
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
             <div style={{ fontSize: 14, color: "#666" }}>総受電件数</div>
-            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>{totalCount}件</div>
+            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+              {totalCount}件
+            </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
             <div style={{ fontSize: 14, color: "#666" }}>未対応</div>
-            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>{newCount}件</div>
+            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+              {newCount}件
+            </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
             <div style={{ fontSize: 14, color: "#666" }}>対応中</div>
-            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>{inProgressCount}件</div>
+            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+              {inProgressCount}件
+            </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 16 }}>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 12,
+              padding: 16,
+            }}
+          >
             <div style={{ fontSize: 14, color: "#666" }}>対応完了</div>
-            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>{doneCount}件</div>
+            <div style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+              {doneCount}件
+            </div>
           </div>
         </div>
 
@@ -268,7 +385,10 @@ export default async function Home({
           <Link href={makeFilterHref("new")} style={filterButtonStyle(filter === "new")}>
             未対応
           </Link>
-          <Link href={makeFilterHref("in_progress")} style={filterButtonStyle(filter === "in_progress")}>
+          <Link
+            href={makeFilterHref("in_progress")}
+            style={filterButtonStyle(filter === "in_progress")}
+          >
             対応中
           </Link>
           <Link href={makeFilterHref("done")} style={filterButtonStyle(filter === "done")}>
@@ -343,6 +463,10 @@ export default async function Home({
 
                   <div style={{ marginTop: 8 }}>
                     <StatusButton id={call.id} initialStatus={call.status} />
+                  </div>
+
+                  <div style={{ marginTop: 8 }}>
+                    <DeleteCallButton id={call.id} />
                   </div>
 
                   <div style={{ color: "#666", marginTop: 8 }}>

@@ -5,15 +5,14 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient();
     const body = await request.json();
+    const id = body.id;
 
-    const {
-      calls_name,
-      caller_phone,
-      purpose,
-      urgency,
-      summary,
-      memo,
-    } = body;
+    if (!id) {
+      return NextResponse.json(
+        { error: "idがありません" },
+        { status: 400 }
+      );
+    }
 
     const {
       data: { user },
@@ -40,16 +39,33 @@ export async function POST(request: Request) {
       );
     }
 
-    const { error } = await supabase.from("calls").insert({
-      calls_name: calls_name || null,
-      caller_phone: caller_phone || null,
-      purpose: purpose || null,
-      urgency: urgency || "中",
-      summary: summary || null,
-      memo: memo || null,
-      status: "new",
-      company_id: profile.company_id,
-    });
+    const { data: callData, error: callError } = await supabase
+      .from("calls")
+      .select("id, company_id")
+      .eq("id", id)
+      .single();
+
+    if (callError || !callData) {
+      return NextResponse.json(
+        { error: "対象データが見つかりません" },
+        { status: 404 }
+      );
+    }
+
+    if (callData.company_id !== profile.company_id) {
+      return NextResponse.json(
+        { error: "この会社のデータではありません" },
+        { status: 403 }
+      );
+    }
+
+    const { error } = await supabase
+      .from("calls")
+      .update({
+        deleted_at: null,
+        deleted_by: null,
+      })
+      .eq("id", id);
 
     if (error) {
       return NextResponse.json(
@@ -61,7 +77,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json(
-      { error: "受電データの追加に失敗しました" },
+      { error: "復元に失敗しました" },
       { status: 500 }
     );
   }

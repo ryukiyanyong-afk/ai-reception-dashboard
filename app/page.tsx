@@ -6,6 +6,7 @@ import AddCallForm from "./components/AddCallForm";
 import MemoEditor from "./components/MemoEditor";
 import InviteMemberForm from "./components/InviteMemberForm";
 import DeleteCallButton from "./components/DeleteCallButton";
+import RestoreCallButton from "./components/RestoreCallButton";
 
 type CallRow = {
   id: string;
@@ -76,7 +77,7 @@ function getUrgencyPriority(urgency: string | null) {
 export default async function Home({
   searchParams,
 }: {
-  searchParams?: Promise<{ filter?: string; q?: string }>;
+  searchParams?: Promise<{ filter?: string; q?: string; view?: string }>;
 }) {
   const supabase = await createClient();
 
@@ -118,22 +119,30 @@ export default async function Home({
 
   const { data: companyData } = await supabase
     .from("companies")
-    .select("name, invite_code")
+    .select("name")
     .eq("id", profileData.company_id)
     .single();
 
   const params = searchParams ? await searchParams : {};
   const filter = params?.filter || "all";
   const q = params?.q?.trim() || "";
+  const view = params?.view || "active";
 
- const { data, error } = await supabase
-  .from("calls")
-  .select(
-    "id, created_at, caller_phone, calls_name, purpose, urgency, summary, memo, status, company_id, deleted_at"
-  )
-  .eq("company_id", profileData.company_id)
-  .is("deleted_at", null)
-  .order("created_at", { ascending: false });
+  let callsQuery = supabase
+    .from("calls")
+    .select(
+      "id, created_at, caller_phone, calls_name, purpose, urgency, summary, memo, status, company_id, deleted_at"
+    )
+    .eq("company_id", profileData.company_id)
+    .order("created_at", { ascending: false });
+
+  if (view === "trash") {
+    callsQuery = callsQuery.not("deleted_at", "is", null);
+  } else {
+    callsQuery = callsQuery.is("deleted_at", null);
+  }
+
+  const { data, error } = await callsQuery;
 
   const calls: CallRow[] = data ?? [];
 
@@ -190,7 +199,16 @@ export default async function Home({
 
   const makeFilterHref = (nextFilter: string) => {
     const query = new URLSearchParams();
+    query.set("view", view);
     query.set("filter", nextFilter);
+    if (q) query.set("q", q);
+    return `/?${query.toString()}`;
+  };
+
+  const makeViewHref = (nextView: string) => {
+    const query = new URLSearchParams();
+    query.set("view", nextView);
+    query.set("filter", filter);
     if (q) query.set("q", q);
     return `/?${query.toString()}`;
   };
@@ -226,25 +244,6 @@ export default async function Home({
           <div style={{ fontSize: 14, color: "#666" }}>会社名</div>
           <div style={{ fontSize: 20, fontWeight: 700, marginTop: 6 }}>
             {companyData?.name || "-"}
-          </div>
-
-          <div style={{ fontSize: 14, color: "#666", marginTop: 12 }}>
-            招待コード
-          </div>
-          <div
-            style={{
-              fontSize: 24,
-              fontWeight: 700,
-              letterSpacing: 2,
-              marginTop: 6,
-              color: "#111827",
-            }}
-          >
-            {companyData?.invite_code || "-"}
-          </div>
-
-          <div style={{ fontSize: 13, color: "#666", marginTop: 8 }}>
-            社員を追加するときは、この招待コードを共有してください
           </div>
         </div>
 
@@ -316,6 +315,22 @@ export default async function Home({
           </div>
         </div>
 
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            marginBottom: 16,
+          }}
+        >
+          <Link href={makeViewHref("active")} style={filterButtonStyle(view === "active")}>
+            通常一覧
+          </Link>
+          <Link href={makeViewHref("trash")} style={filterButtonStyle(view === "trash")}>
+            ゴミ箱
+          </Link>
+        </div>
+
         <form
           method="GET"
           style={{
@@ -327,6 +342,7 @@ export default async function Home({
           }}
         >
           <input type="hidden" name="filter" value={filter} />
+          <input type="hidden" name="view" value={view} />
           <input
             type="text"
             name="q"
@@ -356,7 +372,7 @@ export default async function Home({
             検索
           </button>
           <Link
-            href={`/?filter=${filter}`}
+            href={`/?view=${view}&filter=${filter}`}
             style={{
               padding: "10px 16px",
               borderRadius: 10,
@@ -405,7 +421,7 @@ export default async function Home({
           }}
         >
           <h2 style={{ fontSize: 20, fontWeight: 700, marginTop: 0 }}>
-            受電一覧
+            {view === "trash" ? "ゴミ箱" : "受電一覧"}
           </h2>
 
           {error ? (
@@ -428,8 +444,23 @@ export default async function Home({
                     background: "#fff",
                   }}
                 >
-                  <div style={{ fontWeight: 700, fontSize: 18 }}>
-                    {call.calls_name || "名前なし"}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: 18 }}>
+                      {call.calls_name || "名前なし"}
+                    </div>
+
+                    {view === "active" ? (
+                     <DeleteCallButton id={call.id} />
+                     ) : (
+                    <RestoreCallButton id={call.id} />
+                    )}
                   </div>
 
                   <div style={{ color: "#666", marginTop: 8 }}>
@@ -459,19 +490,21 @@ export default async function Home({
                     要約：{call.summary || "-"}
                   </div>
 
-                  <MemoEditor id={call.id} initialMemo={call.memo} />
+                  {view === "active" ? (
+                    <>
+                      <MemoEditor id={call.id} initialMemo={call.memo} />
 
-                  <div style={{ marginTop: 8 }}>
-                    <StatusButton id={call.id} initialStatus={call.status} />
-                  </div>
-
-                  <div style={{ marginTop: 8 }}>
-                    <DeleteCallButton id={call.id} />
-                  </div>
+                      <div style={{ marginTop: 8 }}>
+                        <StatusButton id={call.id} initialStatus={call.status} />
+                      </div>
+                    </>
+                  ) : null}
 
                   <div style={{ color: "#666", marginTop: 8 }}>
                     受付時刻：{formatDate(call.created_at)}
                   </div>
+
+                  
                 </div>
               ))}
             </div>

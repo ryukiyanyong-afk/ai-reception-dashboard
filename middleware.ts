@@ -28,7 +28,12 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
-  const isAuthPage = pathname === "/login" || pathname === "/signup";
+
+if (pathname === "/api/webhook/save-call") {
+  return NextResponse.next();
+}
+
+const isAuthPage = pathname === "/login" || pathname === "/signup";
 
   if (!user && !isAuthPage) {
     const url = request.nextUrl.clone();

@@ -2,6 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
+  if (
+    pathname === "/api/webhook/save-call" ||
+    pathname === "/api/line-webhook" ||
+    pathname === "/api/line-notify"
+  ) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({
     request,
   });
@@ -27,13 +37,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const pathname = request.nextUrl.pathname;
-
-if (pathname === "/api/webhook/save-call") {
-  return NextResponse.next();
-}
-
-const isAuthPage = pathname === "/login" || pathname === "/signup";
+  const isAuthPage = pathname === "/login" || pathname === "/signup";
 
   if (!user && !isAuthPage) {
     const url = request.nextUrl.clone();

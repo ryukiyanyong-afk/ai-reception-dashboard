@@ -64,6 +64,21 @@ export default function JoinPage() {
 
     if (!inviteInfo) return;
 
+    const { data: canAddMember, error: canAddMemberError } = await supabase.rpc(
+  "can_add_member",
+  { target_company_id: inviteInfo.companyId }
+);
+
+if (canAddMemberError) {
+  setErrorMessage("人数上限の確認に失敗しました。もう一度お試しください。");
+  return;
+}
+
+if (!canAddMember) {
+  setErrorMessage("このプランではこれ以上メンバーを追加できません。プラン変更が必要です。");
+  return;
+}
+
     setSending(true);
     setErrorMessage("");
     setSuccessMessage("");

@@ -86,7 +86,21 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
-
+// LINE通知
+await fetch(`${process.env.APP_URL}/api/line-notify`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    company: body.calls_name?.trim() || "不明",
+name: body.calls_name?.trim() || "不明",
+phone: body.caller_phone?.trim() || "不明",
+inquiryType: body.purpose?.trim() || "未分類",
+summary: body.summary?.trim() || "要約なし",
+urgency: normalizeUrgency(body.urgency),
+  }),
+});
     return NextResponse.json({
       success: true,
       id: data.id,

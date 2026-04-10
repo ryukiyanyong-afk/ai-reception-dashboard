@@ -1,18 +1,60 @@
 import { NextResponse } from "next/server";
 
+async function sendLineMessage(text: string) {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  const userId = process.env.LINE_USER_ID;
+
+  if (!token || !userId) {
+    throw new Error("LINE env is missing");
+  }
+
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      to: userId,
+      messages: [
+        {
+          type: "text",
+          text,
+        },
+      ],
+    }),
+  });
+
+  const result = await res.text();
+
+  if (!res.ok) {
+    throw new Error(`LINE push failed: ${result}`);
+  }
+
+  return result;
+}
+
+export async function GET() {
+  try {
+    const text = `📞 LINE通知テスト
+
+HOPESの通知テストです。
+このメッセージが届けば、LINE送信は成功です。`;
+
+    await sendLineMessage(text);
+
+    return NextResponse.json({ ok: true, message: "test sent" });
+  } catch (e) {
+    return NextResponse.json(
+      { error: "Unexpected error", detail: String(e) },
+      { status: 500 }
+    );
+  }
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
-    const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const userId = process.env.LINE_USER_ID;
-
-    if (!token || !userId) {
-      return NextResponse.json(
-        { error: "LINE env is missing" },
-        { status: 500 }
-      );
-    }
 
     const text = `📞 新しい受電
 
@@ -23,31 +65,7 @@ export async function POST(req: Request) {
 用件：${body.inquiryType || "未分類"}
 緊急度：${body.urgency || "未判定"}`;
 
-    const res = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        to: userId,
-        messages: [
-          {
-            type: "text",
-            text,
-          },
-        ],
-      }),
-    });
-
-    const result = await res.text();
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: "LINE push failed", detail: result },
-        { status: 500 }
-      );
-    }
+    await sendLineMessage(text);
 
     return NextResponse.json({ ok: true });
   } catch (e) {

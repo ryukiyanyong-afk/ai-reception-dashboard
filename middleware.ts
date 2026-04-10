@@ -4,11 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  if (
-    pathname === "/api/webhook/save-call" ||
-    pathname === "/api/line-webhook" ||
-    pathname === "/api/line-notify"
-  ) {
+  if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 

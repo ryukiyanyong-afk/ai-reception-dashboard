@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase-server";
+import { createClient } from "@supabase/supabase-js";
 
-type SaveCallWebhookBody = {
+type SaveCallBody = {
   company_id?: string;
   calls_name?: string;
   caller_phone?: string;
@@ -12,72 +12,75 @@ type SaveCallWebhookBody = {
   status?: string;
 };
 
-function normalizeUrgency(value?: string) {
-  if (value === "高" || value === "中" || value === "低") return value;
-  return "中";
+function normalizeUrgency(value?: string | null) {
+  if (!value) return "未判定";
+
+  const v = value.trim();
+
+  if (["高", "high", "High", "HIGH", "緊急"].includes(v)) return "高";
+  if (["中", "medium", "Medium", "MEDIUM", "普通"].includes(v)) return "中";
+  if (["低", "low", "Low", "LOW"].includes(v)) return "低";
+
+  return v;
 }
 
-function normalizeStatus(value?: string) {
-  if (value === "new" || value === "in_progress" || value === "done") return value;
-  return "new";
+function normalizeStatus(value?: string | null) {
+  if (!value) return "未対応";
+
+  const v = value.trim();
+
+  if (["未対応", "new", "NEW"].includes(v)) return "未対応";
+  if (["対応中", "progress", "PROGRESS", "in_progress"].includes(v)) return "対応中";
+  if (["対応完了", "done", "DONE", "completed"].includes(v)) return "対応完了";
+
+  return v;
 }
 
 export async function POST(request: Request) {
   try {
-    const secret = request.headers.get("x-webhook-secret");
-    const expectedSecret = process.env.AI_WEBHOOK_SECRET;
+    const webhookSecret = process.env.AI_WEBHOOK_SECRET;
+    const requestSecret = request.headers.get("x-ai-webhook-secret");
 
-    if (!expectedSecret) {
+    if (!webhookSecret || requestSecret !== webhookSecret) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = (await request.json()) as SaveCallBody;
+
+    if (!body.company_id) {
       return NextResponse.json(
-        { error: "AI_WEBHOOK_SECRET が未設定です" },
+        { error: "company_id is required" },
+        { status: 400 }
+      );
+    }
+
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json(
+        { error: "Supabase env is missing" },
         { status: 500 }
       );
     }
 
-    if (secret !== expectedSecret) {
-      return NextResponse.json(
-        { error: "認証に失敗しました" },
-        { status: 401 }
-      );
-    }
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-    const body = (await request.json()) as SaveCallWebhookBody;
-
-    if (!body.company_id) {
-      return NextResponse.json(
-        { error: "company_id がありません" },
-        { status: 400 }
-      );
-    }
-
-    const supabase = await createClient();
-
-    const { data: company, error: companyError } = await supabase
-      .from("companies")
-      .select("id")
-      .eq("id", body.company_id)
-      .single();
-
-    if (companyError || !company) {
-      return NextResponse.json(
-        { error: "company_id が不正です" },
-        { status: 400 }
-      );
-    }
+    const insertPayload = {
+      company_id: body.company_id,
+      calls_name: body.calls_name?.trim() || "不明",
+      caller_phone: body.caller_phone?.trim() || null,
+      purpose: body.purpose?.trim() || "未分類",
+      urgency: normalizeUrgency(body.urgency),
+      summary: body.summary?.trim() || "要約なし",
+      memo: body.memo?.trim() || null,
+      status: normalizeStatus(body.status),
+    };
 
     const { data, error } = await supabase
       .from("calls")
-      .insert({
-        company_id: body.company_id,
-        calls_name: body.calls_name?.trim() || "不明",
-        caller_phone: body.caller_phone?.trim() || null,
-        purpose: body.purpose?.trim() || null,
-        urgency: normalizeUrgency(body.urgency),
-        summary: body.summary?.trim() || null,
-        memo: body.memo?.trim() || null,
-        status: normalizeStatus(body.status),
-      })
-      .select("id")
+      .insert(insertPayload)
+      .select("id, calls_name, caller_phone, purpose, urgency, summary")
       .single();
 
     if (error) {
@@ -86,28 +89,63 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
-// LINE通知
-await fetch(`${process.env.APP_URL}/api/line-notify`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    company: body.calls_name?.trim() || "不明",
-name: body.calls_name?.trim() || "不明",
-phone: body.caller_phone?.trim() || "不明",
-inquiryType: body.purpose?.trim() || "未分類",
-summary: body.summary?.trim() || "要約なし",
-urgency: normalizeUrgency(body.urgency),
-  }),
-});
+
+    const appUrl = process.env.APP_URL;
+
+    if (!appUrl) {
+      return NextResponse.json(
+        {
+          ok: true,
+          saved: true,
+          lineNotified: false,
+          id: data.id,
+          warning: "APP_URL is missing",
+        },
+        { status: 200 }
+      );
+    }
+
+    const lineNotifyRes = await fetch(`${appUrl}/api/line-notify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        company: data.calls_name || "不明",
+        phone: data.caller_phone || "不明",
+        inquiryType: data.purpose || "未分類",
+        summary: data.summary || "要約なし",
+        urgency: data.urgency || "未判定",
+      }),
+    });
+
+    const lineNotifyResult = await lineNotifyRes.text();
+
+    if (!lineNotifyRes.ok) {
+      return NextResponse.json(
+        {
+          ok: true,
+          saved: true,
+          lineNotified: false,
+          id: data.id,
+          lineError: lineNotifyResult,
+        },
+        { status: 200 }
+      );
+    }
+
     return NextResponse.json({
-      success: true,
+      ok: true,
+      saved: true,
+      lineNotified: true,
       id: data.id,
     });
-  } catch {
+  } catch (error) {
     return NextResponse.json(
-      { error: "保存に失敗しました" },
+      {
+        error: "保存に失敗しました",
+        detail: String(error),
+      },
       { status: 500 }
     );
   }
